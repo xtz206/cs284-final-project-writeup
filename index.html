@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulating and Path-Tracing Translucent Jello — Milestone</title>
+<style>
+  /* Close to browser defaults: serif text, black on white, default link colors. */
+  body {
+    font-family: "Times New Roman", Times, "Liberation Serif", serif;
+    background: #fff;
+    color: #000;
+  }
+  main { max-width: 800px; margin: 0 auto; padding: 8px; }
+  a { overflow-wrap: anywhere; }
+  .course { margin: 0; }
+  .subtitle { font-style: italic; }
+  .team { list-style: none; padding: 0; }
+  .todo { color: #c00; }
+  .abstract { margin: 1em 0; }
+  figure { margin: 1.5em 0; }
+  figure img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  figure.plot img { max-width: 560px; width: 100%; }
+  figcaption { margin-top: 0.5em; font-size: 0.95em; }
+  .tex-sub { font-size: 0.8em; }
+  table { border-collapse: collapse; }
+  caption { caption-side: top; text-align: left; padding-bottom: 0.5em; font-size: 0.95em; }
+  th, td { border: 1px solid #000; padding: 4px 6px; text-align: left; vertical-align: top; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  .table-wrap { overflow-x: auto; margin: 1.5em 0; }
+  .references li { margin-bottom: 0.5em; }
+  @media print {
+    main { max-width: none; padding: 0; }
+    h2, h3 { break-after: avoid; page-break-after: avoid; }
+    table, tr, li, figure { break-inside: avoid; page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <p class="course">CS 184/284A Final Project Milestone</p>
+  <h1>Simulating and Path-Tracing Translucent Jello</h1>
+  <ul class="team">
+    <li>Eric Wu</li>
+    <li>Wenxuan Yuan</li>
+    <li>Arthur Yu</li>
+    <li>Alex Dils</li>
+  </ul>
+  <p>University of California, Berkeley</p>
+  <p><strong>Links:</strong>
+    webpage <span class="todo">[TODO: URL]</span> &middot;
+    video <span class="todo">[TODO: URL]</span> &middot;
+    slides <span class="todo">[TODO: URL]</span></p>
+</header>
+
+<h2>Abstract</h2>
+<p class="abstract">
+  We simulate a block of jello as a volumetric soft body with two solvers, a
+  mass-spring system on a tetrahedral mesh and XPBD with volume constraints, and
+  render each frame in our own path tracer as a refractive, absorbing medium. At
+  the milestone the full pipeline runs end to end: both solvers, with volume terms,
+  friction and a shaking plate, export every frame to the path tracer, and we have
+  rendered both planned scenarios (drop and shake) for both solvers.
+</p>
+
+<figure id="fig-teaser">
+  <img src="figures/I1-07_drop-impact-filmstrip.png"
+       alt="Two rows of six rendered frames of a red jello cube falling onto a floor in front of three spheres; the cube squashes and bulges on impact, then springs back up.">
+  <figcaption><strong>Figure 1.</strong> The jello drop, simulated and path traced end to end.
+    Top: mass-spring; bottom: XPBD, same material and camera. The block lands at
+    0.17&nbsp;s (top dips, sides bulge, spheres behind it are magnified), then springs
+    back. 960&times;540, 64&nbsp;spp.</figcaption>
+</figure>
+
+<h2>1. Progress</h2>
+
+<p><strong>Mesh.</strong> An 8&nbsp;&times;&nbsp;8&nbsp;&times;&nbsp;8-cell grid split into five
+  tetrahedra per cell, mirrored by cell parity so face diagonals match, gives a 10&nbsp;cm block
+  with 729 vertices, 2,560 tets and 768 boundary triangles.</p>
+
+<p><strong>Solvers.</strong> <em>Mass-spring</em>: a damped spring on each tet edge,
+  semi-implicit Euler, and an optional per-tet volume penalty
+  <i>E</i> = &frac12;&nbsp;<i>k</i><sub>v</sub>&nbsp;(<i>V</i> &minus; <i>V</i><sub>0</sub>)<sup>2</sup>&nbsp;/&nbsp;<i>V</i><sub>0</sub>.
+  <em>XPBD</em> <a href="#ref-macklin2016">[Macklin et al. 2016]</a>:
+  edge-distance and tet-volume constraints with substepping and one
+  symmetric Gauss&ndash;Seidel pass per substep. We match the materials by setting compliance to
+  1/<i>k</i><sub>s</sub> and 1/<i>k</i><sub>v</sub>, so differences between the solvers come from the
+  integration, not the material.</p>
+
+<p><strong>Contact.</strong> Both solvers share one collider interface (signed distance,
+  normal, collider velocity) and one Coulomb friction rule, applied at the velocity
+  level for mass-spring and at the position level for XPBD. Colliders are the ground
+  and a kinematic plate shaking sinusoidally (5&nbsp;Hz, 10&nbsp;mm, near the block's sway
+  resonance of 5.5&nbsp;Hz). A sliding test matches Coulomb's stopping distance
+  <i>v</i><sub>0</sub><sup>2</sup>&nbsp;/&nbsp;2<i>&mu;g</i> within 1.5% for <i>&mu;</i>&nbsp;&le;&nbsp;0.5
+  with both solvers.</p>
+
+<p><strong>Rendering.</strong> The simulator writes each frame's boundary surface into a
+  template COLLADA scene for our HW3 path tracer. We implemented the dielectric BSDF
+  (exact Fresnel), fixed the integrator for transmitted rays, and added a jello
+  material (ior 1.34) with Beer&ndash;Lambert absorption
+  <a href="#ref-pharr2023">[Pharr et al. 2023]</a>: a ray
+  segment that leaves the jello through its outward geometric normal ran inside it,
+  so its radiance is scaled by <i>e</i><sup>&minus;<i>&sigma;</i><sub class="tex-sub">a</sub><i>t</i></sup>.
+  This needs no inside/outside state because the mesh is watertight. Against the analytic
+  transmittance of a slab (Fresnel at both faces plus inter-reflections), renders agree within
+  1.1% for optical depths 0&ndash;2.</p>
+
+<h2>2. Preliminary Results</h2>
+
+<p><strong>Volume preservation.</strong> Without volume terms the block loses up to
+  7&ndash;8% of its volume on impact and single tets shrink to 38&ndash;46% of their rest
+  volume. With them, both solvers stay under the proposal's 1% target
+  (<a href="#fig-volume">Figure 2</a>, <a href="#tab-solvers">Table 1</a>).</p>
+
+<p><strong>Stability and cost.</strong> The penalty term makes explicit mass-spring
+  stiffer, so it needs more substeps (38 &rarr; 60 at <i>k</i><sub>v</sub> = 10<sup>5</sup>&nbsp;Pa;
+  159 at 10<sup>6</sup>). XPBD's volume constraints do the opposite (39 &rarr; 22), because they
+  prevent the tet inversions that limit edge-only XPBD. An XPBD substep costs about
+  5&times; a mass-spring substep, so at equal accuracy (0.3% error) the two cost
+  about the same per frame (21 vs. 19.5&nbsp;ms). Both run faster than real time.</p>
+
+<figure id="fig-volume" class="plot">
+  <img src="figures/Q1-01_drop-volume-error-4-solvers.png"
+       alt="Two line plots over 2.5 seconds for four solver setups. Without volume terms the volume error swings to about minus 7 percent and the smallest tet drops to 40 percent of rest volume; with volume terms both stay near zero error and above 87 percent.">
+  <figcaption><strong>Figure 2.</strong> 10&nbsp;cm drop. Top: volume error (shaded band: &plusmn;1%).
+    Bottom: the most-compressed tet's volume relative to rest.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table id="tab-solvers">
+  <caption><strong>Table 1.</strong> 10&nbsp;cm drop on the mesh, 5&nbsp;s. Worst volume error over all
+    output frames and median wall-clock time per 1/30&nbsp;s frame.</caption>
+  <thead>
+    <tr><th>Solver</th><th class="num">Substeps</th><th class="num">Vol. err.</th><th class="num">ms/frame</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Mass-spring, springs only</td><td class="num">100</td><td class="num">7.24%</td><td class="num">2.2</td></tr>
+    <tr><td>Mass-spring + <i>k</i><sub>v</sub> = 10<sup>5</sup>&nbsp;Pa</td><td class="num">150</td><td class="num">0.84%</td><td class="num">8.1</td></tr>
+    <tr><td>Mass-spring + <i>k</i><sub>v</sub> = 10<sup>6</sup>&nbsp;Pa</td><td class="num">400</td><td class="num">0.30%</td><td class="num">21.3</td></tr>
+    <tr><td>XPBD, edges only</td><td class="num">100</td><td class="num">7.71%</td><td class="num">11.3</td></tr>
+    <tr><td>XPBD + volume (10<sup>&minus;6</sup>&nbsp;Pa<sup>&minus;1</sup>)</td><td class="num">50</td><td class="num">0.90%</td><td class="num">9.7</td></tr>
+    <tr><td>XPBD + volume (10<sup>&minus;6</sup>&nbsp;Pa<sup>&minus;1</sup>)</td><td class="num">100</td><td class="num">0.32%</td><td class="num">19.5</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>Solver comparison.</strong> With matched materials the two solvers drop,
+  squash and rebound almost identically (<a href="#fig-teaser">Figure 1</a>). On the shaking
+  plate they sway and rock by similar amounts, but stick-slip makes their paths
+  drift apart after a few cycles. XPBD needs 100 substeps for the shake: at 50 it
+  behaves as a softer material. Below about 50 substeps XPBD also adds a spurious
+  spin on impact, which we attribute to the sequential constraint ordering.</p>
+
+<p><strong>Rendered sequences.</strong> All four sequences (drop and shake, both solvers;
+  4&nbsp;s, 121 frames each) are rendered at 960&times;540, 64&nbsp;spp, max depth 8, with
+  worst volume errors of 0.09&ndash;0.47%. Rendering took 7.4&nbsp;h on one laptop
+  (47&ndash;65&nbsp;s per frame). Absorption gives the jello its color
+  (<a href="#fig-absorption">Figure 3</a>).</p>
+
+<figure id="fig-absorption">
+  <img src="figures/R3-01_absorption-sweep.png"
+       alt="Three renders of a jello cube, from light salmon to deep red as the absorption coefficient increases.">
+  <figcaption><strong>Figure 3.</strong> Absorption coefficient <i>&sigma;</i><sub>a</sub> scaled
+    &times;0.25, &times;1, &times;4 from (3, 36, 48)&nbsp;m<sup>&minus;1</sup>: green and blue are
+    absorbed first, so the color deepens from salmon to dark red.</figcaption>
+</figure>
+
+<h2>3. Progress Against the Plan</h2>
+
+<p>Every Week 1 and Week 2 item in the proposal is done, and the milestone goal
+  (both scenarios, both solvers, rendered end to end) is met. Changes from the plan:</p>
+<ul>
+  <li><em>No caustics.</em> Counting emission after every specular bounce
+    produced caustics but filled the walls with fireflies at 64&ndash;256&nbsp;spp. We
+    count it only on purely specular camera paths, so shadows under the jello
+    are dark.</li>
+  <li><em>Shake parameters.</em> We use 5&nbsp;Hz, 10&nbsp;mm instead of the sketched
+    3&nbsp;Hz, 15&nbsp;mm, at which the block just rides the plate.</li>
+  <li><em>Render noise.</em> At 64&nbsp;spp the impact frames show grain near the
+    bottom of the block, from long internally reflected paths.</li>
+</ul>
+
+<h2>4. Updated Plan</h2>
+
+<p><strong>Week 3 (Nov 23&ndash;29).</strong> Record real jello and fit stiffness and damping
+  to its oscillation frequency and decay. Run the stiffness, time-step and
+  resolution sweeps (up to 16<sup>3</sup> cells, 20,480 tets) with each volume term on
+  and off. Try graph-colored XPBD to remove the spin artifact. Tune <i>&sigma;</i><sub>a</sub> and
+  ior against photos of real jello.</p>
+
+<p><strong>Week 4 (Nov 30&ndash;Dec 6).</strong> Freeze code on Dec 2 and render the final
+  sequences on all four laptops, at more samples per pixel for hero frames. Write
+  the final plots, paper, video and presentation. Volumetric scattering and a
+  deformation-aware medium remain stretch goals if time allows.</p>
+
+<h2>References</h2>
+<ol class="references">
+  <li id="ref-macklin2016">Miles Macklin, Matthias M&uuml;ller, and Nuttapong Chentanez. 2016.
+    XPBD: Position-Based Simulation of Compliant Constrained Dynamics. In
+    <em>Proceedings of the 9th International Conference on Motion in Games</em> (MIG '16).
+    ACM, New York, NY, USA, 49&ndash;54.
+    <a href="https://doi.org/10.1145/2994258.2994272">doi:10.1145/2994258.2994272</a></li>
+  <li id="ref-pharr2023">Matt Pharr, Wenzel Jakob, and Greg Humphreys. 2023.
+    <em>Physically Based Rendering: From Theory to Implementation</em> (4th ed.).
+    MIT Press, Cambridge, MA, USA.</li>
+</ol>
+
+</main>
+</body>
+</html>
